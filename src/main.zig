@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @import("c.zig");
 const ln = @import("lineNumbers.zig");
+const colors = @import("colors.zig");
 
 pub fn readFile(Allocator: *std.mem.Allocator, infile: []const u8) ![]const u8 {
     const file_contents = try std.fs.cwd().readFileAlloc(Allocator, infile, 4096);
@@ -57,12 +58,6 @@ pub fn main() anyerror!void {
     // const font = c.TTF_OpenFont("Sans.ttf", 24);
     const font = c.TTF_OpenFontRW(rw, 1, settings.font_size);
 
-    const white = c.SDL_Color{ .r = 255, .g = 255, .b = 255, .a = 255 };
-    const red = c.SDL_Color{ .r = 255, .g = 0, .b = 0, .a = 255 };
-    const green = c.SDL_Color{ .r = 0, .g = 255, .b = 0, .a = 255 };
-    const blue = c.SDL_Color{ .r = 0, .g = 0, .b = 255, .a = 255 };
-    const black = c.SDL_Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
-
     var cmd_args = std.process.args();
     _ = cmd_args.skip();
 
@@ -80,6 +75,8 @@ pub fn main() anyerror!void {
         file_len += 1;
     }
     file_len -= 1;
+
+    var camera = c.SDL_Rect{ .x = 0, .y = 0, .w = 0, .h = 0 };
 
     var quit = false;
     var renderText: bool = true;
@@ -103,6 +100,18 @@ pub fn main() anyerror!void {
                         }
                     }
                 },
+                c.SDL_MOUSEWHEEL => {
+                    // Handle scrolling
+                    if (event.wheel.y > 0) {
+                        renderText = true;
+                        camera.y += 5;
+                    } else if (event.wheel.y < 0) {
+                        renderText = true;
+                        if (camera.y > 0) {
+                            camera.y -= 5;
+                        }
+                    }
+                },
                 else => {},
             }
         }
@@ -113,12 +122,12 @@ pub fn main() anyerror!void {
             for (text.items) |line, i| {
                 var printed_line = line;
                 // Various Filters to the line can be added here
-                printed_line = filter_blk: {
+                printed_line = color_filter: {
                     const numberPrompt = ln.addLineNumbers(allocator, i, file_len);
                     const nline = try std.fmt.allocPrint(allocator, "{s}{s}", .{ numberPrompt, line });
-                    break :filter_blk nline;
+                    break :color_filter nline;
                 };
-                const surface = c.TTF_RenderText_Shaded(font, @ptrCast([*c]const u8, printed_line), white, black) orelse {
+                const surface = c.TTF_RenderText_Shaded(font, @ptrCast([*c]const u8, printed_line), colors.white, colors.black) orelse {
                     c.SDL_Log("Unable to load TTF: %s", c.SDL_GetError());
                     return error.SDLInitializationFailed;
                 };
@@ -133,7 +142,10 @@ pub fn main() anyerror!void {
                 var texW: c_int = 0;
                 var texH: c_int = 0;
                 const texQuery = c.SDL_QueryTexture(texture, null, null, &texW, &texH);
-                const str_rect = c.SDL_Rect{ .x = 0, .y = @intCast(c_int, i) * texH, .w = texW, .h = texH };
+                const x = 0; // - camera.x?
+                const line_y = @intCast(c_int, i) * texH;
+                const y = if (camera.y > 0) line_y - camera.y else line_y;
+                const str_rect = c.SDL_Rect{ .x = x, .y = y, .w = texW, .h = texH };
                 _ = c.SDL_RenderCopy(renderer, texture, null, &str_rect);
             }
             renderText = false;
@@ -141,6 +153,6 @@ pub fn main() anyerror!void {
 
         c.SDL_RenderPresent(renderer);
 
-        c.SDL_Delay(100);
+        c.SDL_Delay(10);
     }
 }
