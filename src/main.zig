@@ -1,31 +1,14 @@
-const c = @cImport({
-    @cInclude("SDL2/SDL.h");
-    @cInclude("SDL2/SDL_ttf.h");
-});
-
 const std = @import("std");
+const c = @import("c.zig");
+const ln = @import("lineNumbers.zig");
 
 pub fn readFile(Allocator: *std.mem.Allocator, infile: []const u8) ![]const u8 {
     const file_contents = try std.fs.cwd().readFileAlloc(Allocator, infile, 4096);
     return file_contents;
 }
 
-pub fn countDigits(comptime T: type, n: T) T {
-    var count: T = 0;
-    var num = n;
-    if (num == 0) {
-        count += 1;
-        return count;
-    }
-    while (num != 0) : (count += 1) {
-        num = num / 10;
-    }
-    return count;
-}
-
 pub fn main() anyerror!void {
     const compile_settings = struct {
-        config_file: []const u8 = "gar_edit.config",
         font: []const u8 = "../assets/Sans.ttf",
         font_size: usize = 24,
         window_width: usize = 1280,
@@ -51,7 +34,7 @@ pub fn main() anyerror!void {
     }
     defer c.TTF_Quit();
 
-    const screen = c.SDL_CreateWindow("gar_edit", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, settings.window_width, settings.window_height, 0) orelse {
+    const screen = c.SDL_CreateWindow("sf-write", c.SDL_WINDOWPOS_UNDEFINED, c.SDL_WINDOWPOS_UNDEFINED, settings.window_width, settings.window_height, c.SDL_WINDOW_RESIZABLE) orelse {
         c.SDL_Log("Unable to create window: %s", c.SDL_GetError());
         return error.SDLInitializationFailed;
     };
@@ -105,18 +88,37 @@ pub fn main() anyerror!void {
         while (c.SDL_PollEvent(&event) != 0) {
             switch (event.@"type") {
                 c.SDL_QUIT => {
+                    // Handle window "X"
                     quit = true;
+                },
+                c.SDL_WINDOWEVENT => {
+                    // Render text on resize
+                    renderText = true;
+                },
+                c.SDL_KEYDOWN => {
+                    // Handle ctrl+q quit
+                    if (event.key.keysym.sym == c.SDLK_q) {
+                        if ((event.key.keysym.mod & c.KMOD_CTRL) != 0) {
+                            quit = true;
+                        }
+                    }
                 },
                 else => {},
             }
         }
 
+        // Only render text when we have to
         if (renderText) {
             _ = c.SDL_RenderClear(renderer);
             for (text.items) |line, i| {
-                const spaces = "     "[0 .. 2 * (countDigits(usize, file_len) - countDigits(usize, i + 1))];
-                const nline = try std.fmt.allocPrint(allocator, "{s}{d}   {s}", .{ spaces, i + 1, line });
-                const surface = c.TTF_RenderText_Shaded(font, @ptrCast([*c]const u8, nline), white, black) orelse {
+                var printed_line = line;
+                // Various Filters to the line can be added here
+                printed_line = filter_blk: {
+                    const numberPrompt = ln.addLineNumbers(allocator, i, file_len);
+                    const nline = try std.fmt.allocPrint(allocator, "{s}{s}", .{ numberPrompt, line });
+                    break :filter_blk nline;
+                };
+                const surface = c.TTF_RenderText_Shaded(font, @ptrCast([*c]const u8, printed_line), white, black) orelse {
                     c.SDL_Log("Unable to load TTF: %s", c.SDL_GetError());
                     return error.SDLInitializationFailed;
                 };
